@@ -98,4 +98,4 @@ firebase deploy --only firestore:rules   # when you are ready
 
 - Rules cannot iterate a list, so the **element types** of `levels_passed` are validated by the mapper but not by the rules (it only affects the owner's own document).
 - A client can still self-report a score within bounds; the rules only stop regressions and out-of-range values. Real anti-cheat needs a trusted backend (Cloud Function) - outside this module by design.
-- Content authoring and any privileged operation must run server-side (Admin SDK); there is intentionally no admin path in this module.<img width="1901" height="902" alt="image" src="https://github.com/user-attachments/assets/2db26a6e-5b5a-4580-aedb-3b5122005efe" />
+- Content authoring and any privileged operation must run server-side (Admin SDK); there is intentionally no admin path in this module.
