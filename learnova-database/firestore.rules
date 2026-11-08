@@ -1,0 +1,127 @@
+rules_version = '2';
+
+// =============================================================================
+// Learnova Firestore Security Rules  -  the authorization + validation authority.
+//
+// Replaces the removed frontend access-rules.js. These rules run on Firebase for EVERY
+// client request, including requests that bypass the Learnova gateway.
+//
+// Schema (keys must match database/access-datatype.js):
+//   users/{uid}                          uid, display_name, email_id?, created_at, updated_at
+//   user_progress/{uid}                  user_id, levels_passed[], total_score, streak_count, updated_at
+//   courses/{courseId}                   title, published
+//   courses/{courseId}/levels/{levelId}  title, order, content
+//
+// Limits below mirror PROGRESS_LIMITS / PROFILE_LIMITS in access-datatype.js.
+// No frontend role / privilege exists: nothing in the client-writable data grants access.
+// Content authoring (courses/levels) is NOT possible from the client: use a trusted server
+// (Admin SDK / Cloud Functions), which bypasses these rules.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isIntBetween(v, lo, hi) {
+      return v is int && v >= lo && v <= hi;
+    }
+
+    // ---- users/{uid} --------------------------------------------------------
+    match /users/{uid} {
+      function validName(v) {
+        return v is string && v.size() >= 1 && v.size() <= 80;
+      }
+
+      // email_id is optional, but when present it must be the verified token email.
+      function emailMatchesAuth(data) {
+        return !('email_id' in data)
+          || (request.auth.token.get('email', null) != null
+              && data.email_id == request.auth.token.email);
+      }
+
+      allow read: if isOwner(uid);
+
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['uid', 'display_name', 'email_id', 'created_at', 'updated_at'])
+        && request.resource.data.keys().hasAll(['uid', 'display_name', 'created_at', 'updated_at'])
+        && request.resource.data.uid == uid
+        && validName(request.resource.data.display_name)
+        && emailMatchesAuth(request.resource.data)
+        && request.resource.data.created_at == request.time
+        && request.resource.data.updated_at == request.time;
+
+      // Only the display name (and the server timestamp) may change. uid, email_id, created_at and
+      // any server-managed field present on the document are immutable from the client.
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['display_name', 'updated_at'])
+        && validName(request.resource.data.display_name)
+        && request.resource.data.updated_at == request.time;
+
+      allow delete: if false;
+    }
+
+    // ---- user_progress/{uid} ------------------------------------------------
+    match /user_progress/{uid} {
+      function validLevels(v) {
+        // Rules cannot iterate a list, so element types are not checked here (own document only).
+        return v is list && v.size() <= 500;
+      }
+      function validScore(v) {
+        return isIntBetween(v, 0, 10000000);
+      }
+      function validStreak(v) {
+        return isIntBetween(v, 0, 36500);
+      }
+
+      allow read: if isOwner(uid);
+
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['user_id', 'levels_passed', 'total_score', 'streak_count', 'updated_at'])
+        && request.resource.data.keys().hasAll(['user_id', 'levels_passed', 'total_score', 'streak_count', 'updated_at'])
+        && request.resource.data.user_id == uid
+        && validLevels(request.resource.data.levels_passed)
+        && validScore(request.resource.data.total_score)
+        && validStreak(request.resource.data.streak_count)
+        && request.resource.data.updated_at == request.time;
+
+      // user_id is immutable. Score and completed levels may only grow; the streak may reset.
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['levels_passed', 'total_score', 'streak_count', 'updated_at'])
+        && validLevels(request.resource.data.levels_passed)
+        && validScore(request.resource.data.total_score)
+        && validStreak(request.resource.data.streak_count)
+        && request.resource.data.total_score >= resource.data.get('total_score', 0)
+        && request.resource.data.levels_passed.hasAll(resource.data.get('levels_passed', []))
+        && request.resource.data.updated_at == request.time;
+
+      allow delete: if false;
+    }
+
+    // ---- courses/{courseId} (published content, read-only for clients) ------
+    match /courses/{courseId} {
+      // `resource == null` lets a read of a missing course return "not found" instead of a rules error.
+      allow read: if isSignedIn()
+        && (resource == null || resource.data.get('published', false) == true);
+      allow write: if false;
+
+      match /levels/{levelId} {
+        allow read: if isSignedIn()
+          && get(/databases/$(database)/documents/courses/$(courseId)).data.get('published', false) == true;
+        allow write: if false;
+      }
+    }
+
+    // ---- default deny --------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

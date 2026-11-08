@@ -1,0 +1,17 @@
+{
+  "name": "learnova-database-module",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Learnova database access module: gateway, numeric data-type registry, services, cache, Firestore Security Rules.",
+  "scripts": {
+    "test": "vitest run",
+    "test:rules": "firebase emulators:exec --only firestore --project learnova-rules-test \"vitest run --config vitest.rules.config.js\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.0",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.35.0",
+    "vitest": "^3.2.4"
+  }
+}
